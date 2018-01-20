@@ -33,10 +33,10 @@
 #define NW1950_MAX_Y 32767
 #define NW1950_MIN_W 0
 #define NW1950_MAX_W 32767
-#define NW1950_DEFAULT_W 1000
+#define NW1950_DEFAULT_W 1600
 #define NW1950_MIN_H 0
 #define NW1950_MAX_H 32767
-#define NW1950_DEFAULT_H 1000
+#define NW1950_DEFAULT_H 900
 
 /* table of devices that work with this driver */
 static struct usb_device_id fermi_table [] = {
@@ -394,6 +394,7 @@ static void fermi_input_event(struct usb_fermi *dev, struct fermi_touch_report_t
 		input_report_abs(dev->input_dev, ABS_MT_TOUCH_MINOR, NW1950_DEFAULT_H);
 		input_mt_sync(dev->input_dev);
 	}
+/*
 	// mouse
 	if (touch_report->touch[0].state == FERMI_TOUCH_DOWN ||
 			touch_report->touch[0].state == FERMI_TOUCH ||
@@ -403,7 +404,14 @@ static void fermi_input_event(struct usb_fermi *dev, struct fermi_touch_report_t
 		input_report_abs(dev->input_dev, ABS_X, touch_report->touch[0].x);
 		input_report_abs(dev->input_dev, ABS_Y, touch_report->touch[0].y);
 	}
+*/
 	// sync
+	if (touch_report->touch[0].state == FERMI_TOUCH_DOWN ||
+			touch_report->touch[0].state == FERMI_TOUCH ||
+			touch_report->touch[0].state == FERMI_TOUCH_UP ||
+			touch_report->touch[0].state == FERMI_TOUCH_HOVER) {
+		input_report_key(dev->input_dev, BTN_TOUCH, touch_report->touch[0].state == FERMI_TOUCH_UP ? 0 : 1);
+	}
 	input_sync(dev->input_dev);
 	//printk("fermi_write BTN_LEFT: %d, BTN_RIGHT: %d, ABS_X: %d, ABS_Y: %d\n", button & 1, button & 2, x , y);
 }
@@ -612,11 +620,17 @@ static int fermi_probe(struct usb_interface *interface, const struct usb_device_
 		retval = -ENOMEM;
 		goto error;
 	}
+
+	__set_bit(EV_KEY, dev->input_dev->evbit);
+	__set_bit(EV_ABS, dev->input_dev->evbit);
+	__set_bit(BTN_TOUCH, dev->input_dev->keybit);
+	__set_bit(INPUT_PROP_DIRECT, dev->input_dev->propbit);
+
 	dev->input_dev->name = "Nextwindow Fermi Touchscreen";
-	dev->input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
-	dev->input_dev->keybit[BIT_WORD(BTN_MOUSE)] = BIT_MASK(BTN_LEFT) | BIT_MASK(BTN_RIGHT) | BIT_MASK(BTN_TOOL_FINGER);
-	input_set_abs_params(dev->input_dev, ABS_X, NW1950_MIN_X, NW1950_MAX_X, 0, 0);
-	input_set_abs_params(dev->input_dev, ABS_Y, NW1950_MIN_Y, NW1950_MAX_Y, 0, 0);
+//	dev->input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
+//	dev->input_dev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_LEFT) | BIT_MASK(BTN_RIGHT) | BIT_MASK(BTN_TOOL_FINGER);
+//	input_set_abs_params(dev->input_dev, ABS_X, NW1950_MIN_X, NW1950_MAX_X, 0, 0);
+//	input_set_abs_params(dev->input_dev, ABS_Y, NW1950_MIN_Y, NW1950_MAX_Y, 0, 0);
 	input_set_abs_params(dev->input_dev, ABS_MT_TRACKING_ID, 0, 255, 0, 0);
 	input_set_abs_params(dev->input_dev, ABS_MT_POSITION_X, NW1950_MIN_X, NW1950_MAX_X, 0, 0);
 	input_set_abs_params(dev->input_dev, ABS_MT_POSITION_Y, NW1950_MIN_Y, NW1950_MAX_Y, 0, 0);
