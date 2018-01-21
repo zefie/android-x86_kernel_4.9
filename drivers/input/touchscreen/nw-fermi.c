@@ -25,6 +25,7 @@
 #include <linux/kfifo.h>
 #include <linux/vmalloc.h>
 #include <linux/version.h>
+#include <linux/input/mt.h>
 
 /* HID mouse defines */
 #define NW1950_MIN_X 0
@@ -33,10 +34,9 @@
 #define NW1950_MAX_Y 32767
 #define NW1950_MIN_W 0
 #define NW1950_MAX_W 32767
-#define NW1950_DEFAULT_W 1600
 #define NW1950_MIN_H 0
 #define NW1950_MAX_H 32767
-#define NW1950_DEFAULT_H 900
+#define NW1950_MAX_TOUCH 2
 
 /* table of devices that work with this driver */
 static struct usb_device_id fermi_table [] = {
@@ -382,38 +382,23 @@ static ssize_t fermi_read(struct file *file, char *buffer, size_t count, loff_t 
 
 static void fermi_input_event(struct usb_fermi *dev, struct fermi_touch_report_t *touch_report)
 {
-	int i;
-	int count = min(touch_report->count, (unsigned char)2);
+	bool state;
+	int i, num = 0, count = min(touch_report->count, (unsigned char)NW1950_MAX_TOUCH);
 	// multitouch
 	for (i = 0; i < count; i++) {
-		input_report_abs(dev->input_dev, ABS_MT_TRACKING_ID, touch_report->touch[i].id);
+		input_mt_slot(dev->input_dev, i);
+		state = touch_report->touch[i].state != FERMI_TOUCH_UP;
+		input_mt_report_slot_state(dev->input_dev, MT_TOOL_FINGER, state);
+                if (!state)
+                        continue;
+
 		input_report_abs(dev->input_dev, ABS_MT_POSITION_X, touch_report->touch[i].x);
 		input_report_abs(dev->input_dev, ABS_MT_POSITION_Y, touch_report->touch[i].y);
-		// we just set width and height to 1 now for android 2.x as it seems to need it
-		input_report_abs(dev->input_dev, ABS_MT_TOUCH_MAJOR, NW1950_DEFAULT_W);
-		input_report_abs(dev->input_dev, ABS_MT_TOUCH_MINOR, NW1950_DEFAULT_H);
-		input_mt_sync(dev->input_dev);
+		num++;
 	}
-/*
-	// mouse
-	if (touch_report->touch[0].state == FERMI_TOUCH_DOWN ||
-			touch_report->touch[0].state == FERMI_TOUCH ||
-			touch_report->touch[0].state == FERMI_TOUCH_UP ||
-			touch_report->touch[0].state == FERMI_TOUCH_HOVER) {
-		input_report_key(dev->input_dev, BTN_LEFT, touch_report->touch[0].state == FERMI_TOUCH_UP ? 0 : 1);
-		input_report_abs(dev->input_dev, ABS_X, touch_report->touch[0].x);
-		input_report_abs(dev->input_dev, ABS_Y, touch_report->touch[0].y);
-	}
-*/
-	// sync
-	if (touch_report->touch[0].state == FERMI_TOUCH_DOWN ||
-			touch_report->touch[0].state == FERMI_TOUCH ||
-			touch_report->touch[0].state == FERMI_TOUCH_UP ||
-			touch_report->touch[0].state == FERMI_TOUCH_HOVER) {
-		input_report_key(dev->input_dev, BTN_TOUCH, touch_report->touch[0].state == FERMI_TOUCH_UP ? 0 : 1);
-	}
+	input_mt_sync_frame(dev->input_dev);
+	input_mt_report_finger_count(dev->input_dev, num);
 	input_sync(dev->input_dev);
-	//printk("fermi_write BTN_LEFT: %d, BTN_RIGHT: %d, ABS_X: %d, ABS_Y: %d\n", button & 1, button & 2, x , y);
 }
 
 static ssize_t fermi_write(struct file *file, const char *user_buffer,
@@ -627,15 +612,18 @@ static int fermi_probe(struct usb_interface *interface, const struct usb_device_
 	__set_bit(INPUT_PROP_DIRECT, dev->input_dev->propbit);
 
 	dev->input_dev->name = "Nextwindow Fermi Touchscreen";
-//	dev->input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
-//	dev->input_dev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_LEFT) | BIT_MASK(BTN_RIGHT) | BIT_MASK(BTN_TOOL_FINGER);
-//	input_set_abs_params(dev->input_dev, ABS_X, NW1950_MIN_X, NW1950_MAX_X, 0, 0);
-//	input_set_abs_params(dev->input_dev, ABS_Y, NW1950_MIN_Y, NW1950_MAX_Y, 0, 0);
-	input_set_abs_params(dev->input_dev, ABS_MT_TRACKING_ID, 0, 255, 0, 0);
+        input_set_abs_params(dev->input_dev, ABS_MT_TRACKING_ID, 0, NW1950_MAX_TOUCH, 0, 0);
+	input_set_abs_params(dev->input_dev, ABS_X, NW1950_MIN_X, NW1950_MAX_X, 0, 0);
+	input_set_abs_params(dev->input_dev, ABS_Y, NW1950_MIN_Y, NW1950_MAX_Y, 0, 0);
 	input_set_abs_params(dev->input_dev, ABS_MT_POSITION_X, NW1950_MIN_X, NW1950_MAX_X, 0, 0);
 	input_set_abs_params(dev->input_dev, ABS_MT_POSITION_Y, NW1950_MIN_Y, NW1950_MAX_Y, 0, 0);
-	input_set_abs_params(dev->input_dev, ABS_MT_TOUCH_MAJOR, NW1950_MIN_W, NW1950_MAX_W, 0, 0);
-	input_set_abs_params(dev->input_dev, ABS_MT_TOUCH_MINOR, NW1950_MIN_H, NW1950_MAX_H, 0, 0);
+
+	retval = input_mt_init_slots(dev->input_dev, NW1950_MAX_TOUCH, INPUT_MT_DIRECT | INPUT_MT_DROP_UNUSED);
+	if (retval) {
+		dev->input_dev_registered = false;
+		goto error;
+	}
+
 	retval = input_register_device(dev->input_dev);
 	if (retval) {
 		//err("Could not register input device");
